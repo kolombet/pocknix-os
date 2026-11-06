@@ -35,8 +35,19 @@ source=("gamescope::git+https://github.com/ValveSoftware/gamescope.git#commit=${
         '0012-libliftoff-treat-enodev-as-no-fit.patch'
         '0013-libliftoff-give-planes-the-layer-zpos.patch'
         '0014-steamcompmgr-report-wayland-windows-to-steam.patch'
-        '0015-wlserver-pass-touch-through-to-native-wayland-windows.patch')
-sha256sums=('SKIP' 'SKIP' 'SKIP' 'SKIP' 'SKIP' 'SKIP' 'SKIP' 'SKIP' 'SKIP' 'SKIP' 'SKIP')
+        '0015-wlserver-pass-touch-through-to-native-wayland-windows.patch'
+        '0016-drm-synthesize-edid-for-edidless-internal-panels.patch'
+        '0017-drm-support-known-display-profiles-for-edidless-panels.patch'
+        '0018-drm-compose-gamma22-hdr-without-hardware-color-management.patch'
+        '0019-wsi-filter-hdr-formats-by-underlying-support.patch'
+        '0020-color-scale-sdr-white-on-gamma22-hdr-output.patch'
+        '0021-color-fall-back-to-app-hdr-metadata-for-tonemapping.patch'
+        '0022-drm-sdr-color-management-through-dpu-output-luts.patch'
+        '0023-steamcompmgr-arm64-virtual-white.patch'
+        '0024-color-p3-red-is-wide-gamut.patch'
+        '0025-drm-per-plane-color-management-through-msm-plane-color-pipelines.patch')
+sha256sums=('SKIP' 'SKIP' 'SKIP' 'SKIP' 'SKIP' 'SKIP' 'SKIP' 'SKIP' 'SKIP' 'SKIP' 'SKIP'
+            'SKIP' 'SKIP' 'SKIP' 'SKIP' 'SKIP' 'SKIP' 'SKIP' 'SKIP' 'SKIP' 'SKIP')
 
 prepare() {
   cd gamescope
@@ -52,6 +63,16 @@ prepare() {
   patch -p1 < "${srcdir}/0013-libliftoff-give-planes-the-layer-zpos.patch"
   patch -p1 < "${srcdir}/0014-steamcompmgr-report-wayland-windows-to-steam.patch"
   patch -p1 < "${srcdir}/0015-wlserver-pass-touch-through-to-native-wayland-windows.patch"
+  patch -p1 < "${srcdir}/0016-drm-synthesize-edid-for-edidless-internal-panels.patch"
+  patch -p1 < "${srcdir}/0017-drm-support-known-display-profiles-for-edidless-panels.patch"
+  patch -p1 < "${srcdir}/0018-drm-compose-gamma22-hdr-without-hardware-color-management.patch"
+  patch -p1 < "${srcdir}/0019-wsi-filter-hdr-formats-by-underlying-support.patch"
+  patch -p1 < "${srcdir}/0020-color-scale-sdr-white-on-gamma22-hdr-output.patch"
+  patch -p1 < "${srcdir}/0021-color-fall-back-to-app-hdr-metadata-for-tonemapping.patch"
+  patch -p1 < "${srcdir}/0022-drm-sdr-color-management-through-dpu-output-luts.patch"
+  patch -p1 < "${srcdir}/0023-steamcompmgr-arm64-virtual-white.patch"
+  patch -p1 < "${srcdir}/0024-color-p3-red-is-wide-gamut.patch"
+  patch -p1 < "${srcdir}/0025-drm-per-plane-color-management-through-msm-plane-color-pipelines.patch"
 }
 
 build() {

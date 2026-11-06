@@ -1,0 +1,233 @@
+From: enjihn <150061999+enjihn@users.noreply.github.com>
+Subject: [PATCH] wsi: filter synthetic HDR formats by underlying support
+
+Only advertise synthetic PQ/scRGB surface formats whose VkFormat the
+underlying Vulkan surface actually reports, so clients cannot select a
+format the driver will reject. Covers both surface-format entry points and
+preserves application-owned VkSurfaceFormat2KHR output headers.
+
+From: enjihn <150061999+enjihn@users.noreply.github.com>
+Subject: [PATCH] wsi: filter synthetic HDR formats by underlying support
+
+Only advertise synthetic PQ/scRGB surface formats whose VkFormat the
+underlying Vulkan surface actually reports, so clients cannot select a
+format the driver will reject. Covers both surface-format entry points and
+preserves application-owned VkSurfaceFormat2KHR output headers.
+
+pocknix: tests/ hunks dropped. The two VkLayer_FROG_gamescope_wsi.cpp call-site
+hunks are rewritten for this tree's vkroots dispatch shape (pDispatch is already a
+pointer here: pDispatch->Method, vkroots::helpers::append, not std::bind_front +
+vkroots::append) -- same SurfaceFormatUtils::enumerate/append/filterByUnderlyingVkFormat
+logic, adapted call convention.
+
+diff --git a/layer/VkLayer_FROG_gamescope_wsi.cpp b/layer/VkLayer_FROG_gamescope_wsi.cpp
+index 5c208b7b..80df9cfa 100644
+--- a/layer/VkLayer_FROG_gamescope_wsi.cpp
++++ b/layer/VkLayer_FROG_gamescope_wsi.cpp
+@@ -3,6 +3,7 @@
+ #define VK_USE_PLATFORM_XLIB_KHR
+ #include "vkroots.h"
+ #include "xcb_helpers.hpp"
++#include "surface_format_utils.hpp"
+ #include "vulkan_operators.hpp"
+ #include "present_timing.hpp"
+ #include "gamescope-swapchain-client-protocol.h"
+@@ -1114,9 +1115,9 @@ namespace GamescopeWSILayer {
+     }
+ 
+     static constexpr std::array<VkSurfaceFormat2KHR, 3> s_ExtraHDRSurfaceFormat2s = {{
+-      { .surfaceFormat = { VK_FORMAT_A2B10G10R10_UNORM_PACK32, VK_COLOR_SPACE_HDR10_ST2084_EXT, } },
+-      { .surfaceFormat = { VK_FORMAT_A2R10G10B10_UNORM_PACK32, VK_COLOR_SPACE_HDR10_ST2084_EXT, } },
+-      { .surfaceFormat = { VK_FORMAT_R16G16B16A16_SFLOAT,      VK_COLOR_SPACE_EXTENDED_SRGB_LINEAR_EXT, } },
++      { .sType = VK_STRUCTURE_TYPE_SURFACE_FORMAT_2_KHR, .surfaceFormat = { VK_FORMAT_A2B10G10R10_UNORM_PACK32, VK_COLOR_SPACE_HDR10_ST2084_EXT, } },
++      { .sType = VK_STRUCTURE_TYPE_SURFACE_FORMAT_2_KHR, .surfaceFormat = { VK_FORMAT_A2R10G10B10_UNORM_PACK32, VK_COLOR_SPACE_HDR10_ST2084_EXT, } },
++      { .sType = VK_STRUCTURE_TYPE_SURFACE_FORMAT_2_KHR, .surfaceFormat = { VK_FORMAT_R16G16B16A16_SFLOAT,      VK_COLOR_SPACE_EXTENDED_SRGB_LINEAR_EXT, } },
+     }};
+ 
+     static constexpr auto s_ExtraHDRSurfaceFormats = []() {
+@@ -897,9 +897,22 @@
+           !(canBypass || gamescopeSurface->canBypassXWayland(true)))
+         return pDispatch->GetPhysicalDeviceSurfaceFormatsKHR(physicalDevice, selectedSurface, pSurfaceFormatCount, pSurfaceFormats);
+ 
+-      return vkroots::helpers::append(
++      std::vector<VkSurfaceFormatKHR> underlyingSurfaceFormats;
++      VkResult result = SurfaceFormatUtils::enumerate(
+         pDispatch->GetPhysicalDeviceSurfaceFormatsKHR,
++        underlyingSurfaceFormats,
++        physicalDevice,
++        selectedSurface);
++      if (result != VK_SUCCESS)
++        return result;
++
++      const auto extraHDRSurfaceFormats = SurfaceFormatUtils::filterByUnderlyingVkFormat(
+         s_ExtraHDRSurfaceFormats,
++        underlyingSurfaceFormats);
++
++      return SurfaceFormatUtils::append(
++        pDispatch->GetPhysicalDeviceSurfaceFormatsKHR,
++        extraHDRSurfaceFormats,
+         pSurfaceFormatCount,
+         pSurfaceFormats,
+         physicalDevice,
+@@ -926,9 +926,22 @@
+           !(canBypass || gamescopeSurface->canBypassXWayland(true)))
+         return pDispatch->GetPhysicalDeviceSurfaceFormats2KHR(physicalDevice, &surfaceInfo, pSurfaceFormatCount, pSurfaceFormats);
+ 
+-      return vkroots::helpers::append(
++      std::vector<VkSurfaceFormat2KHR> underlyingSurfaceFormats;
++      VkResult result = SurfaceFormatUtils::enumerate(
+         pDispatch->GetPhysicalDeviceSurfaceFormats2KHR,
++        underlyingSurfaceFormats,
++        physicalDevice,
++        &surfaceInfo);
++      if (result != VK_SUCCESS)
++        return result;
++
++      const auto extraHDRSurfaceFormats = SurfaceFormatUtils::filterByUnderlyingVkFormat(
+         s_ExtraHDRSurfaceFormat2s,
++        underlyingSurfaceFormats);
++
++      return SurfaceFormatUtils::append(
++        pDispatch->GetPhysicalDeviceSurfaceFormats2KHR,
++        extraHDRSurfaceFormats,
+         pSurfaceFormatCount,
+         pSurfaceFormats,
+         physicalDevice,
+diff --git a/layer/surface_format_utils.hpp b/layer/surface_format_utils.hpp
+new file mode 100644
+index 00000000..f0cfa765
+--- /dev/null
++++ b/layer/surface_format_utils.hpp
+@@ -0,0 +1,132 @@
++#pragma once
++
++#include <vulkan/vulkan.h>
++
++#include <algorithm>
++#include <cstdint>
++#include <limits>
++#include <vector>
++
++namespace GamescopeWSILayer::SurfaceFormatUtils {
++
++  inline VkFormat getVkFormat(const VkSurfaceFormatKHR& surfaceFormat) {
++    return surfaceFormat.format;
++  }
++
++  inline VkFormat getVkFormat(const VkSurfaceFormat2KHR& surfaceFormat) {
++    return surfaceFormat.surfaceFormat.format;
++  }
++
++  inline void prepareForQuery(VkSurfaceFormatKHR&) {
++  }
++
++  inline void prepareForQuery(VkSurfaceFormat2KHR& surfaceFormat) {
++    surfaceFormat.sType = VK_STRUCTURE_TYPE_SURFACE_FORMAT_2_KHR;
++    surfaceFormat.pNext = nullptr;
++  }
++
++  template <typename Function, typename OutputArray, typename... Args>
++  VkResult enumerate(Function function, OutputArray& output, Args... arguments) {
++    for (;;) {
++      uint32_t count = 0;
++      VkResult result = function(arguments..., &count, nullptr);
++      if (result != VK_SUCCESS) {
++        output.clear();
++        return result;
++      }
++
++      output.resize(count);
++      for (auto& surfaceFormat : output)
++        prepareForQuery(surfaceFormat);
++
++      if (count == 0)
++        return VK_SUCCESS;
++
++      result = function(arguments..., &count, output.data());
++      if (result == VK_INCOMPLETE)
++        continue;
++      if (result != VK_SUCCESS) {
++        output.clear();
++        return result;
++      }
++
++      output.resize(count);
++      return VK_SUCCESS;
++    }
++  }
++
++  template <typename CandidateArray, typename UnderlyingArray>
++  auto filterByUnderlyingVkFormat(const CandidateArray& candidates, const UnderlyingArray& underlying) {
++    using Candidate = typename CandidateArray::value_type;
++    std::vector<Candidate> filtered;
++    filtered.reserve(candidates.size());
++
++    for (const Candidate& candidate : candidates) {
++      const bool supported = std::any_of(
++        underlying.begin(),
++        underlying.end(),
++        [&](const auto& surfaceFormat) {
++          return getVkFormat(surfaceFormat) == getVkFormat(candidate);
++        });
++      if (supported)
++        filtered.push_back(candidate);
++    }
++
++    return filtered;
++  }
++
++  template <typename Output, typename Extra>
++  void writeExtra(Output& output, const Extra& extra) {
++    output = extra;
++  }
++
++  inline void writeExtra(VkSurfaceFormat2KHR& output, const VkSurfaceFormat2KHR& extra) {
++    // VkSurfaceFormat2KHR is an output structure supplied by the application.
++    // Preserve its sType and pNext chain while filling the result payload.
++    output.surfaceFormat = extra.surfaceFormat;
++  }
++
++  template <typename Function, typename ExtraArray, typename Output, typename... Args>
++  VkResult append(Function function, const ExtraArray& extras, uint32_t* pCount, Output* pOutput, Args... arguments) {
++    uint32_t underlyingCount = 0;
++    VkResult result = function(arguments..., &underlyingCount, nullptr);
++    if (result != VK_SUCCESS)
++      return result;
++
++    if (extras.size() > std::numeric_limits<uint32_t>::max() - underlyingCount)
++      return VK_ERROR_OUT_OF_HOST_MEMORY;
++
++    const uint32_t totalCount = underlyingCount + uint32_t(extras.size());
++    if (!pOutput) {
++      *pCount = totalCount;
++      return VK_SUCCESS;
++    }
++
++    const uint32_t capacity = *pCount;
++    uint32_t underlyingWritten = std::min(capacity, underlyingCount);
++
++    if (underlyingWritten > 0) {
++      result = function(arguments..., &underlyingWritten, pOutput);
++      if (result != VK_SUCCESS) {
++        *pCount = underlyingWritten;
++        return result;
++      }
++    }
++
++    if (underlyingWritten < underlyingCount) {
++      *pCount = underlyingWritten;
++      return VK_INCOMPLETE;
++    }
++
++    const uint32_t remainingCapacity = capacity - underlyingWritten;
++    const uint32_t extraWritten = std::min(remainingCapacity, uint32_t(extras.size()));
++    for (uint32_t i = 0; i < extraWritten; i++)
++      writeExtra(pOutput[underlyingWritten + i], extras[i]);
++
++    *pCount = underlyingWritten + extraWritten;
++    return extraWritten == extras.size()
++      ? VK_SUCCESS
++      : VK_INCOMPLETE;
++  }
++
++}

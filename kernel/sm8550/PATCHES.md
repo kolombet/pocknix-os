@@ -57,6 +57,29 @@ Last rebased: 2026-10-27 (RP6 LRA haptics).
   ROCKNIX's fixed 185-215 Hz window and forced 205 Hz (the RP6 LRA calibrates at ~173 Hz).
   Source: ours.
 
+### Display: HDR color pipeline
+
+- **1090** Drives the DSPP inverse gamma and 17^3 gamut LUT through a ported LUTDMA engine
+  (DPU 9.0+ has no memory-mapped write path to these blocks), exposed as the CRTC's
+  `DEGAMMA_LUT` and `DPU_3D_LUT` properties. Foundation for 1093/1094 and for gamescope's
+  existing CRTC-level SDR color management (`cv_drm_output_luts`) to start working at all.
+  Source: armada 0068, verbatim.
+- **1091** dt-bindings: the DPU node may carry an optional third `"lutdma"` reg entry.
+  Needs: 1090. Source: armada 0069, verbatim.
+- **1092** sm8550.dtsi gains that `lutdma` reg entry at `0xaeac000` (`0x800`). Needs: 1091.
+  Source: armada 0070, verbatim.
+- **1093** Exposes `ABGR2101010`/`XBGR2101010` on DPU planes, the 10-bit swapchain format of
+  Vulkan HDR10 games (the format table already describes both layouts; only the plane/UBWC
+  format lists were missing them). Source: armada 0076, verbatim.
+- **1094** Per-plane IGC (inverse gamma) and 3D LUT color pipelines on the VIG pipes, loaded
+  through 1090's LUTDMA queue, so a compositor can give each scanned-out layer its own
+  transform (HDR10 + SDR overlays, no composite pass). Needs: 1090, 1093. Trap: pocknix only
+  ships the SM8550 catalog, and our own 0066 already collapsed every VIG's
+  `qseed3_3_x_rot_v2` sub_blk to the single `dpu_vig_sblk_qseed3_3_2_rot_v2` (renamed
+  rotation_cfg `dpu_rot_sm8550_cfg_v201`) — upstream's SM8650/SM8750 rot_v2 variants this
+  patch also touches never existed in this tree, so only that one call site (`lut_top_off`
+  `0xa00`) is ported; adapted, not verbatim. Source: armada 0077.
+
 ## Edits to synced files
 
 The local delta `kernel/sm8550/sync-keep` restores after each make sync.
